@@ -391,6 +391,9 @@ class LNS_ALNS_Optimizer:
                       f"{accept_rate:5.1f}% aceptados, {improve_rate:5.1f}% mejoras")
         print(f"{'='*80}\n")
 
+        # Añadir num_drivers a la solución para compatibilidad
+        best['num_drivers'] = final_drivers
+
         return best
 
     def _select_operator(self, stats: Dict) -> str:

@@ -1955,7 +1955,12 @@ class RosterOptimizerWithRegimes:
         # Convertir asignaciones greedy al formato estándar
         for assign in greedy_solution['assignments']:
             shift = assign['shift']
-            driver_id = f"D{assign['driver_id']:03d}"
+            # Manejar driver_id como int o string
+            raw_driver_id = assign['driver_id']
+            if isinstance(raw_driver_id, int):
+                driver_id = f"D{raw_driver_id:03d}"
+            else:
+                driver_id = raw_driver_id  # Ya es string (ej: "D001")
 
             assignments.append({
                 'date': assign['date'].isoformat() if hasattr(assign['date'], 'isoformat') else str(assign['date']),
@@ -1966,7 +1971,7 @@ class RosterOptimizerWithRegimes:
                 'shift': shift.get('shift_number'),
                 'vehicle': shift.get('vehicle', 0),
                 'driver_id': driver_id,
-                'driver_name': f'Conductor {assign["driver_id"]}',
+                'driver_name': f'Conductor {driver_id}',
                 'start_time': shift.get('start_time'),
                 'end_time': shift.get('end_time'),
                 'duration_hours': shift.get('duration_hours'),
@@ -1977,7 +1982,7 @@ class RosterOptimizerWithRegimes:
             # Actualizar driver_summary
             if driver_id not in driver_summary:
                 # Obtener work_start_date del driver en greedy_solution
-                driver_info = greedy_solution['drivers'].get(assign['driver_id'], {})
+                driver_info = greedy_solution['drivers'].get(raw_driver_id, {})
                 work_start_date = driver_info.get('work_start_date')
 
                 driver_summary[driver_id] = {
