@@ -729,6 +729,8 @@ class RosterOptimizerWithRegimes:
                 best_cp_solution = None
                 attempt = 0
                 max_attempts = 15  # Hasta 15 intentos (15 x 120s = 30 min máx teórico)
+                consecutive_feasible_count = 0  # Contador de FEASIBLE consecutivos sin OPTIMAL
+                max_consecutive_feasible = 3  # Límite de FEASIBLE antes de aceptar solución
 
                 # Probar descendiendo de a 1 conductor desde greedy-1
                 for num_drivers_to_try in range(greedy_drivers - 1, min_drivers_target - 1, -1):
@@ -760,14 +762,28 @@ class RosterOptimizerWithRegimes:
                         # Si encontramos OPTIMAL, detener búsqueda inmediatamente
                         if solver_status == 'optimal':
                             print(f"    🎯 SOLUCIÓN ÓPTIMA encontrada - deteniendo búsqueda\n")
+                            consecutive_feasible_count = 0  # Reset counter
                             break
                         else:
-                            print(f"    ℹ️  Continuando búsqueda para encontrar mejor solución...\n")
+                            # FEASIBLE pero no OPTIMAL - incrementar contador
+                            consecutive_feasible_count += 1
+                            print(f"    ℹ️  Solución FEASIBLE ({consecutive_feasible_count}/{max_consecutive_feasible} intentos)")
+
+                            # Si llevamos muchos FEASIBLE consecutivos, probablemente el problema
+                            # es demasiado difícil para probar optimalidad - aceptar solución actual
+                            if consecutive_feasible_count >= max_consecutive_feasible:
+                                print(f"    ⚠️  {max_consecutive_feasible} soluciones FEASIBLE consecutivas - aceptando mejor solución")
+                                print(f"    💡 CP-SAT no puede probar optimalidad en tiempo razonable para este problema")
+                                print(f"    ✓  Mejor solución: {drivers_used} conductores\n")
+                                break
+                            else:
+                                print(f"    ℹ️  Continuando búsqueda para encontrar mejor solución...\n")
                             # Continuar bajando para encontrar el mínimo
                     else:
                         # ✗ No factible con este número
                         print(f"    ✗ No factible con {num_drivers_to_try} conductores")
                         print(f"  ℹ️  Mínimo encontrado: {num_drivers_to_try + 1} conductores\n")
+                        consecutive_feasible_count = 0  # Reset counter
                         # Detener búsqueda (ya encontramos el mínimo)
                         break
 
