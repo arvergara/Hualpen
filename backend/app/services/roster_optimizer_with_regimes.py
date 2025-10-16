@@ -723,7 +723,8 @@ class RosterOptimizerWithRegimes:
                 min_drivers_target = max(1, int(greedy_drivers * 0.5))  # Hasta 50% menos
 
                 print(f"  Rango objetivo: {min_drivers_target} a {greedy_drivers-1} conductores")
-                print(f"  Estrategia: Búsqueda descendente con timeout 120s por intento")
+                timeout_msg = "30s" if self.regime == 'Interurbano' else "60s"
+                print(f"  Estrategia: Búsqueda descendente con timeout {timeout_msg} por intento ({self.regime})")
                 print(f"  Tiempo máximo total: {int(self.timeout)}s (~{int(self.timeout/60)} minutos)\n")
 
                 best_cp_solution = None
@@ -2268,9 +2269,14 @@ class RosterOptimizerWithRegimes:
             solver.parameters.stop_after_first_solution = False  # Buscar óptimo local
 
         else:
-            # Para regímenes no mineros: timeout GENEROSO para búsqueda exhaustiva
-            # ESTRATEGIA AGRESIVA: 120 segundos por intento (2 minutos)
-            timeout_per_attempt = min(120.0, remaining_time)  # Hasta 120 segundos
+            # Para regímenes no mineros: timeout diferenciado según complejidad
+            if self.regime == 'Interurbano':
+                # Interurbano: timeout más corto (30s) - encuentra soluciones rápido pero difícil probar optimalidad
+                # Gap típico: best_bound vs objective no cierra en tiempo razonable
+                timeout_per_attempt = min(30.0, remaining_time)
+            else:
+                # Urbano/Industrial: timeout moderado (60s) - más simple, puede alcanzar OPTIMAL
+                timeout_per_attempt = min(60.0, remaining_time)
 
             solver.parameters.max_time_in_seconds = timeout_per_attempt
             solver.parameters.num_search_workers = 8  # Más workers para paralelizar
