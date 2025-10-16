@@ -1,0 +1,74 @@
+LIMPIEZA DE ARCHIVOS - 14 de Octubre 2025
+==========================================
+
+RESUMEN:
+- Archivos antes: 29 archivos Python en /services/
+- Archivos después: 8 archivos activos + 21 en /old/
+- Reducción: 72% menos archivos en directorio principal
+- Espacio liberado: ~324 KB movidos a /old/
+
+ARCHIVOS MOVIDOS A /old/ (21 archivos):
+----------------------------------------
+
+Vacíos (0 bytes) - 9 archivos:
+  ✓ capacity_analyzer.py
+  ✓ optimization_service.py
+  ✓ roster_optimizer.py
+  ✓ roster_optimizer_advanced.py
+  ✓ roster_optimizer_compliant.py
+  ✓ roster_optimizer_jornada.py
+  ✓ roster_optimizer_validated.py
+  ✓ service_service.py
+
+Optimizadores antiguos (~226 KB) - 8 archivos:
+  ✓ roster_optimizer_adaptive.py (53 KB)
+  ✓ roster_optimizer_fixed.py (39 KB)
+  ✓ roster_optimizer_improved.py (31 KB)
+  ✓ roster_optimizer_v2.py (32 KB)
+  ✓ roster_optimizer_heuristic.py (22 KB)
+  ✓ roster_optimizer_annual_pattern.py (21 KB)
+  ✓ roster_optimizer_simple.py (15 KB)
+  ✓ roster_optimizer_fixed_backup.py (13 KB)
+
+Engines legacy (~48 KB) - 3 archivos:
+  ✓ optimization_engine_ortools.py (23 KB)
+  ✓ output_generator_enhanced.py (16 KB)
+  ✓ optimization_engine.py (8.7 KB)
+
+Servicios no usados (~17 KB) - 2 archivos:
+  ✓ simulation_service.py (9.2 KB)
+  ✓ driver_service.py (8 KB)
+
+ARCHIVOS ACTIVOS QUE PERMANECEN (8 archivos):
+---------------------------------------------
+  ✓ __init__.py (0 B)
+  ✓ excel_reader.py (21 KB) - Lee Excel
+  ✓ html_report_generator.py (33 KB) - Reportes HTML
+  ✓ output_generator.py (25 KB) - Genera salidas
+  ✓ roster_optimizer_grouped.py (40 KB) - Usado en optimize_turns.py
+  ✓ roster_optimizer_traditional.py (44 KB) - Usado en analyze_capacity.py
+  ✓ roster_optimizer_with_regimes.py (116 KB) - PRINCIPAL
+  ✓ traditional_patterns.py (7.4 KB) - Patrones
+
+VERIFICACIÓN:
+-------------
+✅ Imports principales funcionan correctamente
+✅ optimize_plus.py puede ejecutarse normalmente
+✅ README.md creado en /old/ con documentación
+
+IMPACTO:
+--------
+✅ CERO impacto en funcionalidad actual
+✅ Mayor claridad sobre qué archivos están activos
+✅ Reduce confusión al navegar el código
+✅ Archivos antiguos preservados en /old/ (no eliminados)
+
+PRÓXIMOS PASOS OPCIONALES:
+--------------------------
+1. Después de 6 meses sin usarse, considerar eliminar permanentemente /old/
+2. Si optimize_turns.py ya no se usa, mover roster_optimizer_grouped.py a /old/
+3. Si analyze_capacity.py ya no se usa, mover roster_optimizer_traditional.py a /old/
+
+---
+Limpieza realizada por: Claude Code
+Fecha: 2025-10-14
