@@ -137,8 +137,9 @@ class RosterOptimizerWithRegimes:
         self.regime_constraints = self._setup_regime_constraints()
 
         self.start_time = None
-        # Timeout ajustado según régimen (Faena Minera necesita más tiempo por patrones NxN)
-        self.timeout = 900.0 if self.regime in ['Faena Minera', 'Minera'] else 300.0  # 15 min para minera, 5 min otros
+        # Timeout ajustado según régimen
+        # Minera: 15 min, Urbano/Industrial: 10 min (permite búsqueda CP-SAT exhaustiva)
+        self.timeout = 900.0 if self.regime in ['Faena Minera', 'Minera'] else 600.0  # 15 min minera, 10 min otros
 
     def _infer_vehicle_metadata(self, service: Dict[str, Any]) -> Dict[str, str]:
         service_id = service.get('id') or service.get('service_id')
@@ -708,10 +709,70 @@ class RosterOptimizerWithRegimes:
                 print(f"\n  ✓ SOLUCIÓN GREEDY: {greedy_result['num_drivers']} conductores, cobertura {greedy_result['coverage']*100:.1f}%")
                 best_solution = greedy_result
 
-                # TODO: FASE 2 pendiente - CP-SAT toma demasiado tiempo para regímenes urbanos
-                # Por ahora usar solo solución greedy
-                # Próxima mejora: Implementar LNS/ALNS adaptado para regímenes sin ciclos fijos
-                print(f"\n  Usando solución greedy ({greedy_result['num_drivers']} conductores)")
+                # FASE 2: OPTIMIZACIÓN CP-SAT (habilitado según instrucción "SI O SI CP-SAT")
+                print(f"\n{'='*80}")
+                print(f"FASE 2: OPTIMIZACIÓN CP-SAT DESDE SOLUCIÓN GREEDY")
+                print(f"{'='*80}")
+                print(f"  Objetivo: Mejorar desde {greedy_result['num_drivers']} conductores (greedy)")
+
+                # Estrategia: Búsqueda agresiva descendente con timeout generoso
+                greedy_drivers = greedy_result['num_drivers']
+
+                # ESTRATEGIA AGRESIVA: Probar hasta 50% menos que greedy
+                # Timeout total: 600s (10 minutos) permite exploración exhaustiva
+                min_drivers_target = max(1, int(greedy_drivers * 0.5))  # Hasta 50% menos
+
+                print(f"  Rango objetivo: {min_drivers_target} a {greedy_drivers-1} conductores")
+                print(f"  Estrategia: Búsqueda descendente con timeout 120s por intento")
+                print(f"  Tiempo máximo total: {int(self.timeout)}s (~{int(self.timeout/60)} minutos)\n")
+
+                best_cp_solution = None
+                attempt = 0
+                max_attempts = 15  # Hasta 15 intentos (15 x 120s = 30 min máx teórico)
+
+                # Probar descendiendo de a 1 conductor desde greedy-1
+                for num_drivers_to_try in range(greedy_drivers - 1, min_drivers_target - 1, -1):
+                    # Verificar timeout global
+                    elapsed = time.time() - self.start_time
+                    if elapsed > self.timeout:
+                        print(f"  ⏰ Timeout global alcanzado ({elapsed:.1f}s / {self.timeout}s)")
+                        break
+
+                    attempt += 1
+                    if attempt > max_attempts:
+                        print(f"  ℹ️  Alcanzado límite de {max_attempts} intentos")
+                        break
+
+                    remaining = self.timeout - elapsed
+                    print(f"  Intento {attempt}: Probando {num_drivers_to_try} conductores (tiempo restante: {remaining:.0f}s)...")
+
+                    result = self._solve_with_cpsat(all_shifts, num_drivers_to_try, year, month, min_drivers_target)
+
+                    if result['status'] == 'success':
+                        # ✓ Solución factible encontrada
+                        best_cp_solution = result
+                        best_solution = result
+                        drivers_used = result['metrics']['drivers_used']
+                        print(f"    ✓ ÉXITO: {drivers_used} conductores")
+                        print(f"    ℹ️  Continuando búsqueda para encontrar mejor solución...\n")
+                        # Continuar bajando para encontrar el mínimo
+                    else:
+                        # ✗ No factible con este número
+                        print(f"    ✗ No factible con {num_drivers_to_try} conductores")
+                        print(f"  ℹ️  Mínimo encontrado: {num_drivers_to_try + 1} conductores\n")
+                        # Detener búsqueda (ya encontramos el mínimo)
+                        break
+
+                if best_cp_solution:
+                    improvement = greedy_drivers - best_solution['metrics']['drivers_used']
+                    pct = (improvement / greedy_drivers) * 100
+                    print(f"\n  🎉 CP-SAT MEJORÓ LA SOLUCIÓN:")
+                    print(f"     Greedy: {greedy_drivers} conductores")
+                    print(f"     CP-SAT: {best_solution['metrics']['drivers_used']} conductores")
+                    print(f"     Mejora: {improvement} conductores ({pct:.1f}%)")
+                else:
+                    print(f"\n  ℹ️  CP-SAT no logró mejorar solución greedy")
+                    print(f"     Usando: {greedy_drivers} conductores (greedy)")
             else:
                 print(f"\n  ✗ Greedy no encontró solución, fallback a CP-SAT...")
 
@@ -2183,11 +2244,14 @@ class RosterOptimizerWithRegimes:
             solver.parameters.stop_after_first_solution = False  # Buscar óptimo local
 
         else:
-            # Para regímenes no mineros: dar tiempo suficiente pero no excesivo
-            solver.parameters.max_time_in_seconds = min(60.0, remaining_time)  # Hasta 1 min por intento
+            # Para regímenes no mineros: timeout GENEROSO para búsqueda exhaustiva
+            # ESTRATEGIA AGRESIVA: 120 segundos por intento (2 minutos)
+            timeout_per_attempt = min(120.0, remaining_time)  # Hasta 120 segundos
+
+            solver.parameters.max_time_in_seconds = timeout_per_attempt
             solver.parameters.num_search_workers = 8  # Más workers para paralelizar
-            solver.parameters.log_search_progress = False  # Silenciar progreso detallado
-            solver.parameters.stop_after_first_solution = True  # Tomar primera solución factible
+            solver.parameters.log_search_progress = True  # HABILITAR logging para ver progreso
+            solver.parameters.stop_after_first_solution = False  # Buscar solución óptima (no solo primera)
 
         # Estrategia de búsqueda optimizada según feedback
         if self.regime in ['Faena Minera', 'Minera']:
@@ -2936,9 +3000,13 @@ class RosterOptimizerWithRegimes:
                     print(f"          D{driver_id:03d}: {assigned_count} turnos")
 
             # Si quedan turnos, crear nuevos conductores
-            while unassigned:
+            max_new_drivers_per_day = 50  # SAFETY: Limitar creación de conductores por día
+            new_drivers_created = 0
+
+            while unassigned and new_drivers_created < max_new_drivers_per_day:
                 driver_counter += 1
                 driver_id = driver_counter
+                new_drivers_created += 1
 
                 drivers[driver_id] = {
                     'assignments': [],
@@ -2956,8 +3024,16 @@ class RosterOptimizerWithRegimes:
                     print(f"          D{driver_id:03d} (NUEVO): {assigned_count} turnos")
                 else:
                     # No pudo asignar nada, algo está mal
-                    print(f"          ⚠️ No se pudo asignar turnos restantes")
+                    print(f"          ⚠️ No se pudo asignar ningún turno al nuevo conductor D{driver_id:03d}")
+                    print(f"          ⚠️ Turnos restantes: {len(unassigned)}")
+                    if unassigned:
+                        print(f"          ⚠️ Ejemplo turno: {unassigned[0]['service_name']} {unassigned[0]['start_time']}-{unassigned[0]['end_time']}")
                     break
+
+            if unassigned and new_drivers_created >= max_new_drivers_per_day:
+                print(f"          ⚠️ SAFETY LIMIT: Alcanzado máximo de {max_new_drivers_per_day} conductores nuevos por día")
+                print(f"          ⚠️ Turnos sin asignar: {len(unassigned)}")
+                break  # Salir del loop principal de días
 
         # Calcular cobertura
         total_shifts = len(all_shifts)
