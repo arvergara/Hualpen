@@ -3074,16 +3074,24 @@ class RosterOptimizerWithRegimes:
 
         # Registrar asignaciones
         for shift in assigned_today:
+            date_str = date.isoformat()
+
             driver['assignments'].append({
-                'date': date,
+                'date': date_str,  # Usar string para consistencia
                 'shift': shift,
                 'duration_hours': shift['duration_hours']
             })
 
+            # Crear assignment con estructura completa (flatten shift details)
             assignments.append({
-                'driver_id': len(driver.get('assignments', [])),  # Temporal
+                'driver_id': len(driver.get('assignments', [])),  # Temporal (se corregirá después)
                 'shift': shift,
-                'date': date
+                'date': date_str,
+                'start_time': shift.get('start_time'),
+                'end_time': shift.get('end_time'),
+                'duration_hours': shift.get('duration_hours'),
+                'service': shift.get('service'),
+                'service_name': shift.get('service_name')
             })
 
         # Actualizar estado del conductor
@@ -3138,22 +3146,52 @@ class RosterOptimizerWithRegimes:
         for driver_id, driver_info in drivers.items():
             total_hours = sum(a['duration_hours'] for a in driver_info['assignments'])
             work_days = sorted(driver_info['work_days'])
+            formatted_id = f'D{driver_id:03d}'
+            driver_name = f'Conductor {formatted_id}'
 
-            driver_summary[f'D{driver_id:03d}'] = {
+            # Contar domingos trabajados
+            sundays_worked = sum(1 for d in work_days
+                                if (d if isinstance(d, date) else datetime.fromisoformat(d).date()).weekday() == 6)
+
+            # Calcular utilización (44h * 4 semanas = 176h para no-mineros)
+            max_hours = 176
+            utilization = round((total_hours / max_hours * 100), 1) if max_hours > 0 else 0
+
+            driver_summary[formatted_id] = {
+                'name': driver_name,
+                'driver_name': driver_name,
                 'total_hours': total_hours,
+                'total_shifts': len(driver_info['assignments']),
+                'total_assignments': len(driver_info['assignments']),
                 'work_days': len(work_days),
+                'sundays_worked': sundays_worked,
+                'utilization': utilization,
                 'pattern': '6x1 flexible',
-                'regime': self.regime
+                'regime': self.regime,
+                'contract_type': 'fixed_term'
             }
 
-        # Corregir driver_id en assignments
+        # Corregir driver_id y añadir driver_name en assignments
         for i, assignment in enumerate(assignments):
             # Encontrar a qué conductor pertenece basándonos en el orden
+            found = False
             for driver_id, driver_info in drivers.items():
                 if any(a['shift'] == assignment['shift'] and a['date'] == assignment['date']
                        for a in driver_info['assignments']):
-                    assignment['driver_id'] = f'D{driver_id:03d}'
+                    formatted_id = f'D{driver_id:03d}'
+                    assignment['driver_id'] = formatted_id
+                    assignment['driver_name'] = f'Conductor {formatted_id}'
+                    found = True
                     break
+
+            if not found:
+                # Fallback en caso de no encontrar driver
+                print(f"⚠️ Warning: No driver found for assignment #{i}")
+                assignment['driver_id'] = 'D000'
+                assignment['driver_name'] = 'Conductor D000'
+
+        # Calcular costo total
+        total_cost = sum(shift.get('cost', 0) for shift in [a['shift'] for a in assignments])
 
         return {
             'status': 'success',
@@ -3163,7 +3201,8 @@ class RosterOptimizerWithRegimes:
             'driver_summary': driver_summary,
             'metrics': {
                 'drivers_used': num_drivers,
-                'total_assignments': len(assignments)
+                'total_assignments': len(assignments),
+                'total_cost': total_cost
             }
         }
 
