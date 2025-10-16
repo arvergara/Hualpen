@@ -548,8 +548,15 @@ class OutputGenerator:
                 ("Máximo 14h diarias", violations['consecutive_days']),
                 ("Patrón bisemanal", [])
             ]
+        elif regime in ['Urbano', 'Industrial', 'Urbano/Industrial', 'Interno']:
+            # Régimen Urbano/Industrial: 44h semanales
+            restrictions = [
+                ("Máximo 44 horas semanales", violations['max_weekly_hours']),
+                ("Mínimo 2 domingos libres", violations['sunday_restriction']),
+                ("Máximo 6 días consecutivos", violations['consecutive_days'])
+            ]
         else:
-            # Regímenes normales (Urbano, Industrial, Interurbano Art. 25)
+            # Régimen Interurbano Art. 25: 180h mensuales
             restrictions = [
                 ("Máximo 180 horas/mes", violations['max_monthly_hours']),
                 ("Mínimo 2 domingos libres", violations['sunday_restriction']),
