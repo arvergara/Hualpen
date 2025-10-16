@@ -708,8 +708,10 @@ class RosterOptimizerWithRegimes:
                 print(f"\n  ✓ SOLUCIÓN GREEDY: {greedy_result['num_drivers']} conductores, cobertura {greedy_result['coverage']*100:.1f}%")
                 best_solution = greedy_result
 
-                # TODO: Aquí podríamos aplicar LNS/ALNS para mejorar (similar a Faena Minera)
-                # Por ahora usamos la solución greedy directamente
+                # TODO: FASE 2 pendiente - CP-SAT toma demasiado tiempo para regímenes urbanos
+                # Por ahora usar solo solución greedy
+                # Próxima mejora: Implementar LNS/ALNS adaptado para regímenes sin ciclos fijos
+                print(f"\n  Usando solución greedy ({greedy_result['num_drivers']} conductores)")
             else:
                 print(f"\n  ✗ Greedy no encontró solución, fallback a CP-SAT...")
 
@@ -2900,11 +2902,25 @@ class RosterOptimizerWithRegimes:
             # Determinar conductores disponibles hoy
             # Disponibles = los que pueden trabajar (no han superado límites)
             available_drivers = []
+            unavailable_count = 0
             for driver_id, driver_info in drivers.items():
                 # Verificar si puede trabajar hoy
                 can_work = self._can_driver_work_today_no_cycles(driver_info, date)
                 if can_work:
                     available_drivers.append(driver_id)
+                else:
+                    unavailable_count += 1
+
+            # Debug: mostrar si hay conductores no disponibles
+            if unavailable_count > 0 and day_idx < 10:
+                consec_days = drivers[1]['consecutive_days'] if 1 in drivers else 0
+                print(f"          ({unavailable_count} conductores no disponibles - día consecutivo #{consec_days})")
+
+            # MEJORA: Ordenar conductores disponibles por días consecutivos trabajados (ASCENDENTE)
+            # Esto distribuye la carga: primero usan conductores con menos días consecutivos
+            # Permite que algunos lleguen a 6 días mientras otros recién empiezan
+            # Resultado: descansos escalonados en lugar de todos el mismo día
+            available_drivers.sort(key=lambda d_id: drivers[d_id]['consecutive_days'])
 
             # Intentar asignar con conductores existentes
             for driver_id in available_drivers:
