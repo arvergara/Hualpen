@@ -753,9 +753,17 @@ class RosterOptimizerWithRegimes:
                         best_cp_solution = result
                         best_solution = result
                         drivers_used = result['metrics']['drivers_used']
-                        print(f"    ✓ ÉXITO: {drivers_used} conductores")
-                        print(f"    ℹ️  Continuando búsqueda para encontrar mejor solución...\n")
-                        # Continuar bajando para encontrar el mínimo
+                        solver_status = result.get('solver_status', 'feasible')
+
+                        print(f"    ✓ ÉXITO: {drivers_used} conductores (status: {solver_status.upper()})")
+
+                        # Si encontramos OPTIMAL, detener búsqueda inmediatamente
+                        if solver_status == 'optimal':
+                            print(f"    🎯 SOLUCIÓN ÓPTIMA encontrada - deteniendo búsqueda\n")
+                            break
+                        else:
+                            print(f"    ℹ️  Continuando búsqueda para encontrar mejor solución...\n")
+                            # Continuar bajando para encontrar el mínimo
                     else:
                         # ✗ No factible con este número
                         print(f"    ✗ No factible con {num_drivers_to_try} conductores")
