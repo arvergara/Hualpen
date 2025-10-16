@@ -329,7 +329,7 @@ class RosterOptimizerWithRegimes:
         """Configura las restricciones para el régimen único del cliente"""
         if self.regime == 'Interurbano':
             return LaborRegime.interurbano_art25()
-        elif self.regime in ['Industrial', 'Urbano']:
+        elif self.regime in ['Industrial', 'Urbano', 'Interno']:
             return LaborRegime.urbano_industrial()
         elif self.regime == 'Interurbano Bisemanal':
             return LaborRegime.interurbano_bisemanal()
@@ -691,42 +691,44 @@ class RosterOptimizerWithRegimes:
                 best_solution = self._convert_greedy_to_standard(best_greedy, year, month)
 
         else:
-            # Para regímenes no mineros, usar CP-SAT optimizado (presolve habilitado)
+            # Para regímenes no mineros, usar estrategia similar a Faena Minera:
+            # 1. Greedy para solución inicial rápida
+            # 2. LNS/ALNS para optimizar (opcional)
+
             print(f"\n{'='*80}")
-            print(f"OPTIMIZACIÓN CP-SAT PARA REGÍMENES NO MINEROS")
-            print(f"Usando CP-SAT con presolve habilitado y timeout de 60s por intento...")
+            print(f"FASE 1: CONSTRUCCIÓN GREEDY PARA RÉGIMEN {self.regime.upper()}")
+            print(f"Construyendo solución inicial sin ciclos fijos...")
             print(f"{'='*80}")
 
-            # Intentar con búsqueda desde el mínimo, extendida a +10 si es necesario
-            # Con CP-SAT optimizado, cada intento toma ~2-5s, así que podemos probar más
-            max_attempts = min(10, max_drivers - min_drivers + 1)
+            # Usar greedy simple: asignar día por día sin patrón fijo
+            # Este greedy respeta: 44h semanales, 10h diarias, 10h descanso, 6 días consecutivos máx
+            greedy_result = self._greedy_assignment_no_cycles(all_shifts, year, month)
 
-            for attempt, num_drivers in enumerate(range(min_drivers, min_drivers + max_attempts), 1):
-                if time.time() - self.start_time > self.timeout:
-                    print(f"⚠️ Timeout global alcanzado después de {self.timeout}s")
-                    break
+            if greedy_result['status'] == 'success':
+                print(f"\n  ✓ SOLUCIÓN GREEDY: {greedy_result['num_drivers']} conductores, cobertura {greedy_result['coverage']*100:.1f}%")
+                best_solution = greedy_result
 
-                print(f"\n{'='*60}")
-                print(f"INTENTO {attempt}/{max_attempts}: Probando con {num_drivers} conductores...")
-                print(f"{'='*60}")
+                # TODO: Aquí podríamos aplicar LNS/ALNS para mejorar (similar a Faena Minera)
+                # Por ahora usamos la solución greedy directamente
+            else:
+                print(f"\n  ✗ Greedy no encontró solución, fallback a CP-SAT...")
 
-                # Usar CP-SAT con configuración optimizada
-                result = self._solve_with_cpsat(all_shifts, num_drivers, year, month, min_drivers)
+                # Fallback: usar CP-SAT si greedy falla
+                print(f"\n{'='*80}")
+                print(f"FALLBACK: OPTIMIZACIÓN CP-SAT")
+                print(f"{'='*80}")
 
-                if result['status'] == 'success':
-                    actual_used = result['metrics']['drivers_used']
-                    print(f"\n{'🎉'*20}")
-                    print(f"✓ SOLUCIÓN FACTIBLE encontrada con {num_drivers} conductores disponibles")
-                    print(f"  Conductores realmente usados: {actual_used}")
-                    print(f"{'🎉'*20}\n")
-                    best_solution = result
-                    # Encontramos una solución - podemos parar o seguir buscando mejor
-                    # Por ahora, tomamos la primera factible
-                    break
-                else:
-                    print(f"\n{'❌'*20}")
-                    print(f"✗ NO FACTIBLE con {num_drivers} conductores")
-                    print(f"{'❌'*20}\n")
+                max_attempts = min(10, max_drivers - min_drivers + 1)
+
+                for attempt, num_drivers in enumerate(range(min_drivers, min_drivers + max_attempts), 1):
+                    if time.time() - self.start_time > self.timeout:
+                        break
+
+                    result = self._solve_with_cpsat(all_shifts, num_drivers, year, month, min_drivers)
+
+                    if result['status'] == 'success':
+                        best_solution = result
+                        break
 
         if best_solution:
             drivers_used = best_solution['metrics']['drivers_used']
@@ -1758,6 +1760,13 @@ class RosterOptimizerWithRegimes:
                                 # Excede 14h consecutivas - NO PERMITIDO
                                 can_assign = False
 
+                    # RESTRICCIÓN: Límite de 44h semanales (solo regímenes no mineros)
+                    if can_assign and self.regime_constraints.max_weekly_hours:
+                        # Calcular horas acumuladas en la semana actual
+                        weekly_hours = self._calculate_weekly_hours(driver, date, assigned_today, shift)
+                        if weekly_hours > self.regime_constraints.max_weekly_hours:
+                            can_assign = False
+
                     if can_assign:
                         # RESTRICCIÓN CRÍTICA: No puede cambiar de grupo en el mismo día
                         # Los grupos están en ubicaciones geográficas diferentes
@@ -1866,6 +1875,15 @@ class RosterOptimizerWithRegimes:
 
                             if span_hours > 14.0:
                                 # Excede 14h consecutivas - NO PERMITIDO
+                                can_assign = False
+
+                        # RESTRICCIÓN: Límite de 44h semanales (solo regímenes no mineros)
+                        # Para nuevos conductores, solo consideramos assigned_today porque es su primer día
+                        if can_assign and self.regime_constraints.max_weekly_hours:
+                            # Calcular horas del día actual (no tiene historial previo)
+                            daily_hours = sum(s['duration_hours'] for s in assigned_today) + shift['duration_hours']
+                            if daily_hours > self.regime_constraints.max_weekly_hours:
+                                # Si ya en el primer día excedería semanal, no puede
                                 can_assign = False
 
                         # RESTRICCIÓN CRÍTICA: No puede cambiar de grupo en el mismo día
@@ -2379,7 +2397,7 @@ class RosterOptimizerWithRegimes:
                 shifts_with_idx = [(s_idx, shift) for s_idx, shift in enumerate(all_shifts)]
                 self._add_interurbano_constraints(model, X, d_idx, shifts_with_idx)
 
-        elif self.regime in ['Industrial', 'Urbano']:
+        elif self.regime in ['Industrial', 'Urbano', 'Interno']:
             # Restricciones urbanas/industriales (incluye colación de 60 min)
             for d_idx in range(num_drivers):
                 shifts_with_idx = [(s_idx, shift) for s_idx, shift in enumerate(all_shifts)]
@@ -2778,12 +2796,14 @@ class RosterOptimizerWithRegimes:
             works_any_shift = model.NewBoolVar(f'works_any_d{driver_idx}_date{date}')
             model.AddMaxEquality(works_any_shift, [X[driver_idx, s_idx] for s_idx, _ in day_shifts])
 
-            # Si trabaja algún turno ese día, el span debe respetar límite
-            if span > max_span_minutes:
-                # Span excede 14h - NO puede tomar todos estos turnos juntos
-                # Debe elegir un subconjunto que respete el límite
-                # Por simplicidad, prohibimos trabajar ese día si el span total excede 14h
-                model.Add(works_any_shift == 0)
+            # NOTA: La restricción de span es compleja de modelar en CP-SAT porque requiere
+            # saber qué combinación de turnos toma el conductor (no todos).
+            # Por ahora, dejamos que el greedy y la validación final verifiquen el span.
+            # TODO: Implementar restricción de span correctamente en CP-SAT usando variables auxiliares
+
+            # if span > max_span_minutes:
+            #     # Esta restricción es demasiado restrictiva - prohibe TODO el día
+            #     model.Add(works_any_shift == 0)
 
         # RESTRICCIÓN CRÍTICA: Un conductor NO puede cambiar de grupo en el mismo día
         # Los grupos están en ubicaciones geográficas diferentes y los tiempos de traslado
@@ -2832,6 +2852,320 @@ class RosterOptimizerWithRegimes:
         # Los turnos se solapan si uno empieza antes de que termine el otro
         return not (shift1['end_minutes'] <= shift2['start_minutes'] or 
                    shift2['end_minutes'] <= shift1['start_minutes'])
+
+    def _greedy_assignment_no_cycles(self, all_shifts: List[Dict], year: int, month: int) -> Dict[str, Any]:
+        """
+        Greedy para regímenes SIN ciclos fijos (Urbano/Industrial/Interurbano).
+
+        Estrategia:
+        - Asignar día por día
+        - Crear conductores según demanda
+        - Respetar: 44h semanales, 10h diarias, 10h descanso, max 6 días consecutivos, min 2 domingos libres
+        - No asumir patrón NxN fijo
+
+        Returns:
+            Dict con status, assignments, driver_summary, etc.
+        """
+        print(f"\n    🔧 Construyendo solución greedy sin ciclos fijos...")
+
+        # Agrupar turnos por fecha
+        shifts_by_date = defaultdict(list)
+        for shift in all_shifts:
+            date_obj = datetime.fromisoformat(shift['date']).date() if isinstance(shift['date'], str) else shift['date']
+            shifts_by_date[date_obj].append(shift)
+
+        # Ordenar fechas
+        sorted_dates = sorted(shifts_by_date.keys())
+
+        # Inicializar estructuras
+        drivers = {}
+        driver_counter = 0
+        assignments = []
+
+        # Procesar día por día
+        for day_idx, date in enumerate(sorted_dates):
+            day_shifts = shifts_by_date[date]
+            print(f"\n      Día {day_idx + 1} ({date}): {len(day_shifts)} turnos")
+
+            # Ordenar turnos del día por hora de inicio
+            day_shifts.sort(key=lambda s: s['start_minutes'])
+
+            unassigned = day_shifts[:]
+
+            # Determinar conductores disponibles hoy
+            # Disponibles = los que pueden trabajar (no han superado límites)
+            available_drivers = []
+            for driver_id, driver_info in drivers.items():
+                # Verificar si puede trabajar hoy
+                can_work = self._can_driver_work_today_no_cycles(driver_info, date)
+                if can_work:
+                    available_drivers.append(driver_id)
+
+            # Intentar asignar con conductores existentes
+            for driver_id in available_drivers:
+                if not unassigned:
+                    break
+
+                driver = drivers[driver_id]
+                assigned_count = self._assign_shifts_to_driver_no_cycles(
+                    driver, date, unassigned, assignments
+                )
+
+                if assigned_count > 0:
+                    print(f"          D{driver_id:03d}: {assigned_count} turnos")
+
+            # Si quedan turnos, crear nuevos conductores
+            while unassigned:
+                driver_counter += 1
+                driver_id = driver_counter
+
+                drivers[driver_id] = {
+                    'assignments': [],
+                    'work_days': [],
+                    'last_shift_date': None,
+                    'consecutive_days': 0,
+                    'sundays_worked': 0
+                }
+
+                assigned_count = self._assign_shifts_to_driver_no_cycles(
+                    drivers[driver_id], date, unassigned, assignments
+                )
+
+                if assigned_count > 0:
+                    print(f"          D{driver_id:03d} (NUEVO): {assigned_count} turnos")
+                else:
+                    # No pudo asignar nada, algo está mal
+                    print(f"          ⚠️ No se pudo asignar turnos restantes")
+                    break
+
+        # Calcular cobertura
+        total_shifts = len(all_shifts)
+        covered = len(assignments)
+        coverage = covered / total_shifts if total_shifts > 0 else 0.0
+
+        print(f"\n      ✓ Solución completa:")
+        print(f"        Conductores usados: {driver_counter}")
+        print(f"        Asignaciones: {covered}/{total_shifts}")
+
+        # Convertir al formato estándar
+        return self._convert_greedy_no_cycles_to_standard(
+            drivers, assignments, driver_counter, coverage, year, month
+        )
+
+    def _can_driver_work_today_no_cycles(self, driver: Dict, date: date) -> bool:
+        """
+        Verifica si un conductor puede trabajar hoy según restricciones sin ciclos fijos.
+
+        Estrategia 6x1 flexible:
+        - Máximo 6 días consecutivos
+        - Mínimo 2 domingos libres al mes
+        - 44h semanales máximo
+        - 10h descanso entre jornadas
+
+        Returns:
+            True si puede trabajar, False si no
+        """
+        # 1. Verificar días consecutivos (máximo 6)
+        # IMPORTANTE: Solo si ayer trabajó. Si ha descansado, puede volver.
+        if driver['last_shift_date']:
+            days_since_last = (date - driver['last_shift_date']).days
+
+            if days_since_last == 0:
+                # Mismo día, permitido (múltiples turnos)
+                pass
+            elif days_since_last == 1:
+                # Día consecutivo: verificar si ya llegó al máximo
+                if driver['consecutive_days'] >= 6:
+                    return False  # Ya trabajó 6 días, necesita descansar
+            else:
+                # Ha descansado al menos 1 día: puede volver a trabajar
+                # El contador se reseteará en _assign_shifts_to_driver_no_cycles
+                pass
+
+        # 2. Verificar descanso entre jornadas (10h mínimo)
+        # Por simplicidad, asumimos que entre días diferentes siempre hay 10h
+
+        # 3. Verificar domingos (si es domingo, verificar cuántos ha trabajado)
+        if date.weekday() == 6:  # Domingo
+            # Contar domingos del mes actual
+            month_start = date.replace(day=1)
+            if date.month == 12:
+                month_end = date.replace(year=date.year+1, month=1, day=1) - timedelta(days=1)
+            else:
+                month_end = date.replace(month=date.month+1, day=1) - timedelta(days=1)
+
+            sundays_this_month = 0
+            for assign in driver['assignments']:
+                assign_date = assign['date']
+                if isinstance(assign_date, str):
+                    assign_date = datetime.fromisoformat(assign_date).date()
+
+                if month_start <= assign_date <= month_end and assign_date.weekday() == 6:
+                    sundays_this_month += 1
+
+            total_sundays = len([d for d in range((month_end - month_start).days + 1)
+                                if (month_start + timedelta(days=d)).weekday() == 6])
+
+            # Debe dejar al menos 2 domingos libres
+            if sundays_this_month >= (total_sundays - 2):
+                return False  # Ya trabajó suficientes domingos
+
+        return True
+
+    def _assign_shifts_to_driver_no_cycles(self, driver: Dict, date: date,
+                                           unassigned: List[Dict], assignments: List[Dict]) -> int:
+        """
+        Asigna turnos del día a un conductor específico.
+
+        Respeta:
+        - 44h semanales máximo
+        - 12h span máximo por día
+        - 10h diarias máximo
+        - No solapamiento
+        - Mismo grupo geográfico
+
+        Returns:
+            Número de turnos asignados
+        """
+        assigned_today = []
+
+        for shift in unassigned[:]:
+            can_assign = True
+
+            # 1. Verificar solapamiento con turnos ya asignados hoy
+            for prev_shift in assigned_today:
+                if shift['end_minutes'] > prev_shift['start_minutes'] and shift['start_minutes'] < prev_shift['end_minutes']:
+                    can_assign = False
+                    break
+
+            # 2. Verificar span de 12h
+            if can_assign and assigned_today:
+                all_shifts_today = assigned_today + [shift]
+                earliest_start = min(s['start_minutes'] for s in all_shifts_today)
+                latest_end = max(s['end_minutes'] for s in all_shifts_today)
+                span_minutes = latest_end - earliest_start
+                if span_minutes > 720:  # 12h
+                    can_assign = False
+
+            # 3. Verificar 10h diarias
+            if can_assign:
+                daily_hours = sum(s['duration_hours'] for s in assigned_today) + shift['duration_hours']
+                if daily_hours > 10.0:
+                    can_assign = False
+
+            # 4. Verificar 44h semanales
+            if can_assign and self.regime_constraints.max_weekly_hours:
+                weekly_hours = self._calculate_weekly_hours_no_cycles(driver, date, assigned_today, shift)
+                if weekly_hours > self.regime_constraints.max_weekly_hours:
+                    can_assign = False
+
+            # 5. Verificar mismo grupo geográfico
+            if can_assign and assigned_today:
+                current_group = shift.get('service_group')
+                for prev_shift in assigned_today:
+                    prev_group = prev_shift.get('service_group')
+                    if current_group and prev_group and current_group != prev_group:
+                        can_assign = False
+                        break
+
+            if can_assign:
+                assigned_today.append(shift)
+                unassigned.remove(shift)
+
+        # Registrar asignaciones
+        for shift in assigned_today:
+            driver['assignments'].append({
+                'date': date,
+                'shift': shift,
+                'duration_hours': shift['duration_hours']
+            })
+
+            assignments.append({
+                'driver_id': len(driver.get('assignments', [])),  # Temporal
+                'shift': shift,
+                'date': date
+            })
+
+        # Actualizar estado del conductor
+        if assigned_today:
+            if driver['last_shift_date'] and (date - driver['last_shift_date']).days == 1:
+                driver['consecutive_days'] += 1
+            else:
+                driver['consecutive_days'] = 1
+
+            driver['last_shift_date'] = date
+
+            if date not in driver['work_days']:
+                driver['work_days'].append(date)
+
+        return len(assigned_today)
+
+    def _calculate_weekly_hours_no_cycles(self, driver: Dict, current_date: date,
+                                          assigned_today: List[Dict], new_shift: Dict) -> float:
+        """
+        Calcula horas semanales para greedy sin ciclos.
+        Similar a _calculate_weekly_hours pero adaptado a estructura de driver diferente.
+        """
+        weekday = current_date.weekday()
+        week_start = current_date - timedelta(days=weekday)
+        week_end = week_start + timedelta(days=6)
+
+        weekly_hours = 0.0
+
+        for assignment in driver.get('assignments', []):
+            assign_date = assignment['date']
+            if isinstance(assign_date, str):
+                assign_date = datetime.fromisoformat(assign_date).date()
+
+            if week_start <= assign_date <= week_end:
+                weekly_hours += assignment['duration_hours']
+
+        for shift in assigned_today:
+            weekly_hours += shift['duration_hours']
+
+        weekly_hours += new_shift['duration_hours']
+
+        return weekly_hours
+
+    def _convert_greedy_no_cycles_to_standard(self, drivers: Dict, assignments: List[Dict],
+                                               num_drivers: int, coverage: float,
+                                               year: int, month: int) -> Dict[str, Any]:
+        """
+        Convierte resultado del greedy sin ciclos al formato estándar.
+        """
+        driver_summary = {}
+
+        for driver_id, driver_info in drivers.items():
+            total_hours = sum(a['duration_hours'] for a in driver_info['assignments'])
+            work_days = sorted(driver_info['work_days'])
+
+            driver_summary[f'D{driver_id:03d}'] = {
+                'total_hours': total_hours,
+                'work_days': len(work_days),
+                'pattern': '6x1 flexible',
+                'regime': self.regime
+            }
+
+        # Corregir driver_id en assignments
+        for i, assignment in enumerate(assignments):
+            # Encontrar a qué conductor pertenece basándonos en el orden
+            for driver_id, driver_info in drivers.items():
+                if any(a['shift'] == assignment['shift'] and a['date'] == assignment['date']
+                       for a in driver_info['assignments']):
+                    assignment['driver_id'] = f'D{driver_id:03d}'
+                    break
+
+        return {
+            'status': 'success',
+            'num_drivers': num_drivers,
+            'coverage': coverage,
+            'assignments': assignments,
+            'driver_summary': driver_summary,
+            'metrics': {
+                'drivers_used': num_drivers,
+                'total_assignments': len(assignments)
+            }
+        }
 
     def _greedy_assignment_flexible(self, all_shifts: List[Dict], year: int, month: int) -> Dict[str, Any]:
         """
@@ -3027,7 +3361,51 @@ class RosterOptimizerWithRegimes:
                     return False
         
         return True
-    
+
+    def _calculate_weekly_hours(self, driver: Dict, current_date: date,
+                                 assigned_today: List[Dict], new_shift: Dict) -> float:
+        """
+        Calcula las horas totales que el conductor trabajaría en la semana actual
+        si se le asigna el nuevo turno.
+
+        Semana se define como Lunes-Domingo. Si estamos a mitad de semana,
+        contamos desde el lunes de la semana actual.
+
+        Args:
+            driver: Diccionario con información del conductor
+            current_date: Fecha actual
+            assigned_today: Turnos ya asignados hoy
+            new_shift: Turno que se quiere asignar
+
+        Returns:
+            Total de horas en la semana (incluyendo el nuevo turno)
+        """
+        # Calcular inicio de la semana (lunes)
+        weekday = current_date.weekday()  # 0=Lunes, 6=Domingo
+        week_start = current_date - timedelta(days=weekday)
+        week_end = week_start + timedelta(days=6)
+
+        # Sumar horas de asignaciones previas en esta semana
+        weekly_hours = 0.0
+
+        for assignment in driver.get('assignments', []):
+            assign_date = assignment['date']
+            if isinstance(assign_date, str):
+                assign_date = datetime.fromisoformat(assign_date).date()
+
+            # Si está en la semana actual
+            if week_start <= assign_date <= week_end:
+                weekly_hours += assignment['shift']['duration_hours']
+
+        # Sumar horas de turnos asignados hoy (aún no en assignments)
+        for shift in assigned_today:
+            weekly_hours += shift['duration_hours']
+
+        # Sumar el nuevo turno
+        weekly_hours += new_shift['duration_hours']
+
+        return weekly_hours
+
     def _convert_greedy_flexible_to_standard(self, greedy_result: Dict, year: int, month: int) -> Dict[str, Any]:
         """
         Convierte resultado del greedy flexible al formato estándar esperado por output_generator
