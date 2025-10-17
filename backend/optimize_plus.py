@@ -45,54 +45,89 @@ def main():
     else:
         excel_file = '/Users/alfil/Library/CloudStorage/GoogleDrive-andres.vergara@maindset.cl/Mi unidad/Prototipo_Hualpen/nueva_info/Template TURNOS  Hualpén 08-09-2025.xlsx'
 
-    if len(sys.argv) > 2:
-        client_name = sys.argv[2]
-    else:
-        # Solicitar cliente interactivamente
-        print("Clientes disponibles:")
-        reader = ExcelTemplateReader(excel_file)
-        clients = reader.get_available_clients()
-        for i, client in enumerate(clients, 1):
-            print(f"  {i}. {client}")
-
-        selection = input("\nSeleccione cliente (número): ")
-        try:
-            client_name = clients[int(selection) - 1]
-        except:
-            print("Selección inválida, usando Watts por defecto")
-            client_name = 'Watts'
-
-    if len(sys.argv) > 3:
-        year = int(sys.argv[3])
-    else:
-        year = 2025
-
-    if len(sys.argv) > 4:
-        month = int(sys.argv[4])
-    else:
-        month_input = input("Ingrese mes (1-12, 0=año completo): ")
-        month = int(month_input) if month_input else 0
-
-    is_annual = (month == 0)
-
-    print(f"\nParámetros de optimización:")
-    print(f"  - Archivo Excel: {excel_file}")
-    print(f"  - Cliente: {client_name}")
-    if is_annual:
-        print(f"  - Período: {year} (AÑO COMPLETO)")
-    else:
-        print(f"  - Período: {year}-{month:02d}")
-    print()
-
     # Verificar que el archivo existe
     if not os.path.exists(excel_file):
         print(f"ERROR: No se encuentra el archivo {excel_file}")
         return 1
 
     try:
+        # Preparar lector y determinar cliente
+        reader = ExcelTemplateReader(excel_file)
+        clients = reader.get_available_clients()
+        if not clients:
+            print("ERROR: No se encontraron clientes en el archivo Excel.")
+            return 1
+
+        def resolve_client_from_input(raw_input: str) -> str:
+            if not raw_input:
+                return ''
+            normalized = raw_input.strip()
+            if not normalized:
+                return ''
+            if normalized.isdigit():
+                idx = int(normalized)
+                if 1 <= idx <= len(clients):
+                    selected = clients[idx - 1]
+                    print(f"Seleccionando cliente #{idx}: {selected}")
+                    return selected
+                print(f"⚠️  Índice {idx} fuera de rango (1-{len(clients)}).")
+                return ''
+
+            # Buscar coincidencia exacta (ignorando mayúsculas/minúsculas)
+            for client in clients:
+                if client.lower() == normalized.lower():
+                    return client
+
+            print(f"⚠️  Cliente '{raw_input}' no encontrado en el archivo.")
+            return ''
+
+        # PRIMERO: Determinar cliente
+        client_input = sys.argv[2] if len(sys.argv) > 2 else None
+
+        if client_input:
+            client_name = resolve_client_from_input(client_input)
+            if not client_name:
+                fallback = 'Watts' if 'Watts' in clients else clients[0]
+                print(f"Usando cliente por defecto: {fallback}")
+                client_name = fallback
+        else:
+            # Solicitar cliente interactivamente
+            print("Clientes disponibles:")
+            for i, client in enumerate(clients, 1):
+                print(f"  {i}. {client}")
+
+            selection = input("\nSeleccione cliente (número): ")
+            client_name = resolve_client_from_input(selection)
+            if not client_name:
+                fallback = 'Watts' if 'Watts' in clients else clients[0]
+                print(f"Selección inválida, usando {fallback} por defecto")
+                client_name = fallback
+
+        # SEGUNDO: Determinar año y mes
+        if len(sys.argv) > 3:
+            year = int(sys.argv[3])
+        else:
+            year = 2025
+
+        if len(sys.argv) > 4:
+            month = int(sys.argv[4])
+        else:
+            month_input = input("Ingrese mes (1-12, 0=año completo): ")
+            month = int(month_input) if month_input else 0
+
+        is_annual = (month == 0)
+
+        print(f"\nParámetros de optimización:")
+        print(f"  - Archivo Excel: {excel_file}")
+        print(f"  - Cliente: {client_name}")
+        if is_annual:
+            print(f"  - Período: {year} (AÑO COMPLETO)")
+        else:
+            print(f"  - Período: {year}-{month:02d}")
+        print()
+
         # PASO 1: Leer datos del Excel
         print("PASO 1: Leyendo datos del Excel...")
-        reader = ExcelTemplateReader(excel_file)
 
         # Leer datos del cliente
         # Para optimización anual, leer febrero (mes base)
