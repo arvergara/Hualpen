@@ -15,6 +15,9 @@ from dataclasses import dataclass, field
 import time
 import calendar
 
+# Importar LNS/ALNS para Interurbano
+from app.services.lns_alns_optimizer import LNSALNSOptimizer
+
 
 @dataclass
 class LaborRegime:
@@ -708,6 +711,44 @@ class RosterOptimizerWithRegimes:
             if greedy_result['status'] == 'success':
                 print(f"\n  ✓ SOLUCIÓN GREEDY: {greedy_result['num_drivers']} conductores, cobertura {greedy_result['coverage']*100:.1f}%")
                 best_solution = greedy_result
+
+                # FASE 2: OPTIMIZACIÓN (CP-SAT o LNS/ALNS según régimen)
+                # INTERURBANO: Usar LNS/ALNS (más rápido, sin problema de extracción)
+                # OTROS: Usar CP-SAT (más potente para problemas simples)
+                if self.regime == 'Interurbano':
+                    print(f"\n{'='*80}")
+                    print(f"FASE 2: OPTIMIZACIÓN LNS/ALNS PARA INTERURBANO")
+                    print(f"{'='*80}")
+                    print(f"  ⚡ Usando LNS/ALNS en lugar de CP-SAT (más rápido para Interurbano)")
+                    print(f"  Objetivo: Mejorar desde {greedy_result['num_drivers']} conductores (greedy)\n")
+
+                    # Inicializar optimizador LNS/ALNS
+                    lns_optimizer = LNSALNSOptimizer(
+                        regime_constraints=self.regime_constraints,
+                        regime_name=self.regime
+                    )
+
+                    # Optimizar con LNS/ALNS
+                    lns_result = lns_optimizer.optimize(
+                        initial_solution=greedy_result,
+                        all_shifts=all_shifts,
+                        max_iterations=2000,  # 2000 iteraciones
+                        timeout=300  # 5 minutos timeout
+                    )
+
+                    if lns_result and lns_result.get('status') == 'success':
+                        lns_drivers = lns_result['num_drivers']
+                        greedy_drivers = greedy_result['num_drivers']
+                        improvement = greedy_drivers - lns_drivers
+                        print(f"\n🎉 LNS/ALNS MEJORÓ LA SOLUCIÓN:")
+                        print(f"   Greedy:   {greedy_drivers} conductores")
+                        print(f"   LNS/ALNS: {lns_drivers} conductores")
+                        print(f"   Mejora:   {improvement} conductores ({improvement/greedy_drivers*100:.1f}%)\n")
+                        best_solution = lns_result
+                    else:
+                        print(f"\n⚠️  LNS/ALNS no mejoró - usando solución greedy\n")
+
+                    return best_solution
 
                 # FASE 2: OPTIMIZACIÓN CP-SAT (habilitado según instrucción "SI O SI CP-SAT")
                 print(f"\n{'='*80}")
