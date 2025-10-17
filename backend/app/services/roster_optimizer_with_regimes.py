@@ -16,7 +16,7 @@ import time
 import calendar
 
 # Importar LNS/ALNS para Interurbano
-from app.services.lns_alns_optimizer import LNSALNSOptimizer
+from app.services.lns_alns_optimizer import LNS_ALNS_Optimizer
 
 
 @dataclass
@@ -723,7 +723,7 @@ class RosterOptimizerWithRegimes:
                     print(f"  Objetivo: Mejorar desde {greedy_result['num_drivers']} conductores (greedy)\n")
 
                     # Inicializar optimizador LNS/ALNS
-                    lns_optimizer = LNSALNSOptimizer(
+                    lns_optimizer = LNS_ALNS_Optimizer(
                         regime_constraints=self.regime_constraints,
                         regime_name=self.regime
                     )
