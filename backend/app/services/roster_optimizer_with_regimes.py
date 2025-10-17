@@ -2341,26 +2341,34 @@ class RosterOptimizerWithRegimes:
             assignments = []
             driver_regimes = defaultdict(set)  # Track qué regímenes maneja cada conductor
 
+            # OPTIMIZACIÓN: Iterar por conductor primero (menos iteraciones en inner loop)
+            # Cada turno debe tener exactamente 1 conductor, entonces break al encontrar
             for s_idx, shift in enumerate(all_shifts):
+                # Buscar el conductor asignado a este turno
+                assigned_driver = None
                 for d_idx in range(num_drivers):
                     if solver.Value(X[d_idx, s_idx]):
-                        assignments.append({
-                            'date': shift['date'].isoformat(),
-                            'service': shift['service_id'],
-                            'service_name': shift['service_name'],
-                            'service_type': shift['service_type'],
-                            'service_group': shift.get('service_group'),
-                            'shift': shift['shift_number'],
-                            'vehicle': shift['vehicle'],
-                            'driver_id': f'D{d_idx+1:03d}',
-                            'driver_name': f'Conductor {d_idx+1}',
-                            'start_time': shift['start_time'],
-                            'end_time': shift['end_time'],
-                            'duration_hours': shift['duration_hours'],
-                            'vehicle_type': shift.get('vehicle_type'),
-                            'vehicle_category': shift.get('vehicle_category')
-                        })
-                        driver_regimes[d_idx].add(shift['service_type'])
+                        assigned_driver = d_idx
+                        break  # Solo 1 conductor por turno, optimización crítica
+
+                if assigned_driver is not None:
+                    assignments.append({
+                        'date': shift['date'].isoformat(),
+                        'service': shift['service_id'],
+                        'service_name': shift['service_name'],
+                        'service_type': shift['service_type'],
+                        'service_group': shift.get('service_group'),
+                        'shift': shift['shift_number'],
+                        'vehicle': shift['vehicle'],
+                        'driver_id': f'D{assigned_driver+1:03d}',
+                        'driver_name': f'Conductor {assigned_driver+1}',
+                        'start_time': shift['start_time'],
+                        'end_time': shift['end_time'],
+                        'duration_hours': shift['duration_hours'],
+                        'vehicle_type': shift.get('vehicle_type'),
+                        'vehicle_category': shift.get('vehicle_category')
+                    })
+                    driver_regimes[assigned_driver].add(shift['service_type'])
             
             # Análisis del régimen único
             regime_analysis = {
