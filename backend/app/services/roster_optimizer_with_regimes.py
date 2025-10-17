@@ -558,49 +558,49 @@ class RosterOptimizerWithRegimes:
             # FASE 2: LNS/ALNS OPTIMIZATION
             if USE_LNS_ALNS:
                 try:
-                    from app.services.lns_alns_optimizer import LNS_ALNS_Optimizer
-
-                    print(f"\n{'='*80}")
-                    print(f"FASE 2: OPTIMIZACIÓN LNS/ALNS")
-                    print(f"Mejorando solución greedy con Large Neighborhood Search...")
-                    print(f"{'='*80}")
-
-                    # Crear optimizador LNS/ALNS
-                    lns_optimizer = LNS_ALNS_Optimizer(
-                        cycle=best_cycle,
-                        min_rest_hours=5.0,  # 5h descanso entre turnos mismo día
-                        max_daily_hours=14.0
-                    )
-
-                    # Optimizar solución greedy
-                    # Tiempo: 10-12 minutos (deja margen para replicación anual)
-                    lns_solution = lns_optimizer.optimize(
-                        initial_solution=best_greedy,
-                        all_shifts=all_shifts,
-                        max_time=600,  # 10 minutos
-                        temperature_init=100.0,
-                        cooling_rate=0.95,
-                        consolidate_every=50
-                    )
-
-                    # Si LNS mejoró, usar esa solución
-                    if lns_solution['num_drivers'] < best_greedy['num_drivers']:
-                        print(f"\n✨ LNS/ALNS MEJORÓ la solución:")
-                        print(f"   Greedy: {best_greedy['num_drivers']} conductores")
-                        print(f"   LNS:    {lns_solution['num_drivers']} conductores")
-                        print(f"   Mejora: {best_greedy['num_drivers'] - lns_solution['num_drivers']} conductores")
-                        best_greedy = lns_solution
-                        best_cycle = lns_solution['cycle']
-                    else:
-                        print(f"\n⚠️  LNS/ALNS no logró mejorar (greedy ya es muy bueno)")
-                        print(f"   Solución final: {best_greedy['num_drivers']} conductores")
-
-                except ImportError as e:
+                    lns_class = LNS_ALNS_Optimizer
+                except NameError as e:
                     print(f"\n⚠️  No se pudo importar LNS_ALNS_Optimizer: {e}")
                     print(f"   Continuando con solución greedy...")
-                except Exception as e:
-                    print(f"\n⚠️  Error en LNS/ALNS: {e}")
-                    print(f"   Continuando con solución greedy...")
+                else:
+                    try:
+                        print(f"\n{'='*80}")
+                        print(f"FASE 2: OPTIMIZACIÓN LNS/ALNS")
+                        print(f"Mejorando solución greedy con Large Neighborhood Search...")
+                        print(f"{'='*80}")
+
+                        # Crear optimizador LNS/ALNS
+                        lns_optimizer = lns_class(
+                            cycle=best_cycle,
+                            min_rest_hours=5.0,  # 5h descanso entre turnos mismo día
+                            max_daily_hours=14.0
+                        )
+
+                        # Optimizar solución greedy
+                        # Tiempo: 10-12 minutos (deja margen para replicación anual)
+                        lns_solution = lns_optimizer.optimize(
+                            initial_solution=best_greedy,
+                            all_shifts=all_shifts,
+                            max_time=600,  # 10 minutos
+                            temperature_init=100.0,
+                            cooling_rate=0.95,
+                            consolidate_every=50
+                        )
+
+                        # Si LNS mejoró, usar esa solución
+                        if lns_solution['num_drivers'] < best_greedy['num_drivers']:
+                            print(f"\n✨ LNS/ALNS MEJORÓ la solución:")
+                            print(f"   Greedy: {best_greedy['num_drivers']} conductores")
+                            print(f"   LNS:    {lns_solution['num_drivers']} conductores")
+                            print(f"   Mejora: {best_greedy['num_drivers'] - lns_solution['num_drivers']} conductores")
+                            best_greedy = lns_solution
+                            best_cycle = lns_solution['cycle']
+                        else:
+                            print(f"\n⚠️  LNS/ALNS no logró mejorar (greedy ya es muy bueno)")
+                            print(f"   Solución final: {best_greedy['num_drivers']} conductores")
+                    except Exception as e:
+                        print(f"\n⚠️  Error en LNS/ALNS: {e}")
+                        print(f"   Continuando con solución greedy...")
 
             if USE_CPSAT_OPTIMIZATION:
                 print(f"\n{'='*80}")
@@ -713,9 +713,18 @@ class RosterOptimizerWithRegimes:
                 best_solution = greedy_result
 
                 # FASE 2: OPTIMIZACIÓN (CP-SAT o LNS/ALNS según régimen)
-                # INTERURBANO: Usar LNS/ALNS (más rápido, sin problema de extracción)
+                # INTERURBANO: Usar solo Greedy (LNS/ALNS no es compatible, CP-SAT se cuelga)
                 # OTROS: Usar CP-SAT (más potente para problemas simples)
                 if self.regime == 'Interurbano':
+                    print(f"\n{'='*80}")
+                    print(f"FASE 2: OPTIMIZACIÓN NO DISPONIBLE PARA INTERURBANO")
+                    print(f"{'='*80}")
+                    print(f"  ⚠️  CP-SAT: Se queda pegado en extracción de asignaciones")
+                    print(f"  ⚠️  LNS/ALNS: Diseñado para Faena Minera, no compatible con Interurbano")
+                    print(f"  ✓  Usando solución Greedy: {greedy_result['num_drivers']} conductores\n")
+                    return best_solution
+
+                if False and self.regime == 'Interurbano':  # DESHABILITADO
                     print(f"\n{'='*80}")
                     print(f"FASE 2: OPTIMIZACIÓN LNS/ALNS PARA INTERURBANO")
                     print(f"{'='*80}")
@@ -724,17 +733,67 @@ class RosterOptimizerWithRegimes:
 
                     # Inicializar optimizador LNS/ALNS
                     lns_optimizer = LNS_ALNS_Optimizer(
-                        regime_constraints=self.regime_constraints,
-                        regime_name=self.regime
+                        cycle=10,
+                        min_rest_hours=self.regime_constraints.min_rest_between_shifts or 10.0,
+                        max_daily_hours=self.regime_constraints.max_daily_hours or 14.0
                     )
 
-                    # Optimizar con LNS/ALNS
+                    # Optimizar con LNS/ALNS usando la API actual
                     lns_result = lns_optimizer.optimize(
                         initial_solution=greedy_result,
                         all_shifts=all_shifts,
-                        max_iterations=2000,  # 2000 iteraciones
-                        timeout=300  # 5 minutos timeout
+                        max_time=min(300, self.timeout),  # 5 minutos o timeout global
+                        temperature_init=100.0,
+                        cooling_rate=0.95,
+                        consolidate_every=50
                     )
+
+                    if lns_result:
+                        # Alinear métricas con la solución devuelta
+                        lns_result.setdefault('status', 'success')
+                        final_drivers = lns_result.get('num_drivers') or lns_result.get('metrics', {}).get('drivers_used')
+                        if final_drivers is None:
+                            final_drivers = greedy_result['num_drivers']
+                        lns_result['num_drivers'] = final_drivers
+                        if 'metrics' in lns_result:
+                            lns_result['metrics']['drivers_used'] = final_drivers
+                        else:
+                            lns_result['metrics'] = {
+                                'drivers_used': final_drivers,
+                                'total_assignments': len(lns_result.get('assignments', [])),
+                                'total_cost': greedy_result.get('metrics', {}).get('total_cost', 0)
+                            }
+
+                        # Normalizar asignaciones (driver_name, fecha en ISO)
+                        driver_summary = lns_result.get('driver_summary', {})
+                        for assignment in lns_result.get('assignments', []):
+                            driver_id = assignment.get('driver_id')
+                            if 'driver_name' not in assignment:
+                                summary_info = driver_summary.get(driver_id) or driver_summary.get(str(driver_id), {})
+                                driver_name = summary_info.get('driver_name') or summary_info.get('name')
+                                if not driver_name and driver_id:
+                                    driver_name = f'Conductor {driver_id}'
+                                assignment['driver_name'] = driver_name or 'Conductor'
+
+                            shift_info = assignment.get('shift', {})
+                            if 'start_time' not in assignment and shift_info:
+                                assignment['start_time'] = shift_info.get('start_time')
+                                assignment['end_time'] = shift_info.get('end_time')
+                                assignment['duration_hours'] = shift_info.get('duration_hours')
+                                assignment['service'] = shift_info.get('service_id')
+                                assignment['service_name'] = shift_info.get('service_name')
+                                assignment['service_type'] = shift_info.get('service_type')
+                                assignment['service_group'] = shift_info.get('service_group')
+                                assignment['vehicle'] = shift_info.get('vehicle', 0)
+                                assignment['vehicle_type'] = shift_info.get('vehicle_type')
+                                assignment['vehicle_category'] = shift_info.get('vehicle_category')
+
+                            assign_date = assignment.get('date')
+                            if hasattr(assign_date, 'isoformat') and not isinstance(assign_date, str):
+                                if hasattr(assign_date, 'hour'):
+                                    assignment['date'] = assign_date.date().isoformat()
+                                else:
+                                    assignment['date'] = assign_date.isoformat()
 
                     if lns_result and lns_result.get('status') == 'success':
                         lns_drivers = lns_result['num_drivers']
