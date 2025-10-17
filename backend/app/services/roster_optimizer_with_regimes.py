@@ -765,7 +765,7 @@ class RosterOptimizerWithRegimes:
                         break
 
                     remaining = self.timeout - elapsed
-                    print(f"  Intento {attempt}: Probando {num_drivers_to_try} conductores (tiempo restante: {remaining:.0f}s)...")
+                    print(f"\n  🔍 CP-SAT intento {attempt}/{max_attempts}: {num_drivers_to_try} conductores (quedan {remaining:.0f}s)...", end=' ', flush=True)
 
                     result = self._solve_with_cpsat(all_shifts, num_drivers_to_try, year, month, min_drivers_target)
 
@@ -776,34 +776,23 @@ class RosterOptimizerWithRegimes:
                         drivers_used = result['metrics']['drivers_used']
                         solver_status = result.get('solver_status', 'feasible')
 
-                        print(f"    ✓ ÉXITO: {drivers_used} conductores (status: {solver_status.upper()})")
-
-                        # Si encontramos OPTIMAL, detener búsqueda inmediatamente
                         if solver_status == 'optimal':
-                            print(f"    🎯 SOLUCIÓN ÓPTIMA encontrada - deteniendo búsqueda\n")
-                            consecutive_feasible_count = 0  # Reset counter
+                            print(f"✅ ÓPTIMO ({drivers_used} conductores)")
+                            consecutive_feasible_count = 0
                             break
                         else:
-                            # FEASIBLE pero no OPTIMAL - incrementar contador
+                            print(f"✓ Factible ({drivers_used} conductores)")
                             consecutive_feasible_count += 1
-                            print(f"    ℹ️  Solución FEASIBLE ({consecutive_feasible_count}/{max_consecutive_feasible} intentos)")
 
-                            # Si llevamos muchos FEASIBLE consecutivos, probablemente el problema
-                            # es demasiado difícil para probar optimalidad - aceptar solución actual
                             if consecutive_feasible_count >= max_consecutive_feasible:
-                                print(f"    ⚠️  {max_consecutive_feasible} soluciones FEASIBLE consecutivas - aceptando mejor solución")
-                                print(f"    💡 CP-SAT no puede probar optimalidad en tiempo razonable para este problema")
-                                print(f"    ✓  Mejor solución: {drivers_used} conductores\n")
+                                print(f"  ⚠️  Aceptando solución tras {max_consecutive_feasible} intentos factibles")
                                 break
-                            else:
-                                print(f"    ℹ️  Continuando búsqueda para encontrar mejor solución...\n")
                             # Continuar bajando para encontrar el mínimo
                     else:
                         # ✗ No factible con este número
-                        print(f"    ✗ No factible con {num_drivers_to_try} conductores")
-                        print(f"  ℹ️  Mínimo encontrado: {num_drivers_to_try + 1} conductores\n")
-                        consecutive_feasible_count = 0  # Reset counter
-                        # Detener búsqueda (ya encontramos el mínimo)
+                        print(f"❌ No factible")
+                        print(f"  ✓ Mínimo encontrado: {num_drivers_to_try + 1} conductores")
+                        consecutive_feasible_count = 0
                         break
 
                 if best_cp_solution:
@@ -2298,7 +2287,7 @@ class RosterOptimizerWithRegimes:
 
             solver.parameters.max_time_in_seconds = timeout_per_attempt
             solver.parameters.num_search_workers = 8  # Más workers para paralelizar
-            solver.parameters.log_search_progress = True  # HABILITAR logging para ver progreso
+            solver.parameters.log_search_progress = False  # DESHABILITADO: Demasiado verbose
             solver.parameters.stop_after_first_solution = False  # Buscar solución óptima (no solo primera)
 
         # Estrategia de búsqueda optimizada según feedback
@@ -3023,9 +3012,13 @@ class RosterOptimizerWithRegimes:
         assignments = []
 
         # Procesar día por día
+        total_days = len(sorted_dates)
         for day_idx, date in enumerate(sorted_dates):
             day_shifts = shifts_by_date[date]
-            print(f"\n      Día {day_idx + 1} ({date}): {len(day_shifts)} turnos")
+
+            # Mostrar progreso cada 5 días o días especiales
+            if day_idx % 5 == 0 or day_idx == 0 or day_idx == total_days - 1:
+                print(f"\n      📅 Procesando día {day_idx + 1}/{total_days} ({date}): {len(day_shifts)} turnos, {len(drivers)} conductores activos")
 
             # Ordenar turnos del día por hora de inicio
             day_shifts.sort(key=lambda s: s['start_minutes'])
@@ -3044,11 +3037,6 @@ class RosterOptimizerWithRegimes:
                 else:
                     unavailable_count += 1
 
-            # Debug: mostrar si hay conductores no disponibles
-            if unavailable_count > 0 and day_idx < 10:
-                consec_days = drivers[1]['consecutive_days'] if 1 in drivers else 0
-                print(f"          ({unavailable_count} conductores no disponibles - día consecutivo #{consec_days})")
-
             # MEJORA: Ordenar conductores disponibles por días consecutivos trabajados (ASCENDENTE)
             # Esto distribuye la carga: primero usan conductores con menos días consecutivos
             # Permite que algunos lleguen a 6 días mientras otros recién empiezan
@@ -3064,9 +3052,6 @@ class RosterOptimizerWithRegimes:
                 assigned_count = self._assign_shifts_to_driver_no_cycles(
                     driver, date, unassigned, assignments
                 )
-
-                if assigned_count > 0:
-                    print(f"          D{driver_id:03d}: {assigned_count} turnos")
 
             # Si quedan turnos, crear nuevos conductores
             max_new_drivers_per_day = 50  # SAFETY: Limitar creación de conductores por día
@@ -3109,9 +3094,10 @@ class RosterOptimizerWithRegimes:
         covered = len(assignments)
         coverage = covered / total_shifts if total_shifts > 0 else 0.0
 
-        print(f"\n      ✓ Solución completa:")
-        print(f"        Conductores usados: {driver_counter}")
-        print(f"        Asignaciones: {covered}/{total_shifts}")
+        print(f"\n      ✅ Greedy completado:")
+        print(f"         Conductores: {driver_counter}")
+        print(f"         Turnos asignados: {covered}/{total_shifts} ({coverage*100:.1f}%)")
+        print(f"         Días procesados: {total_days}")
 
         # Convertir al formato estándar
         return self._convert_greedy_no_cycles_to_standard(
