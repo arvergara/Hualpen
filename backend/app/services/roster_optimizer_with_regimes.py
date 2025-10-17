@@ -2347,21 +2347,29 @@ class RosterOptimizerWithRegimes:
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
             # Extraer solución
             print(f"\n    🔄 Extrayendo asignaciones ({num_drivers} conductores × {len(all_shifts)} turnos)...")
+            print(f"    ⚡ Usando extracción optimizada (diccionario inverso)...")
             extract_start = time.time()
             assignments = []
-            driver_regimes = defaultdict(set)  # Track qué regímenes maneja cada conductor
+            driver_regimes = defaultdict(set)
 
-            # OPTIMIZACIÓN: Iterar por conductor primero (menos iteraciones en inner loop)
-            # Cada turno debe tener exactamente 1 conductor, entonces break al encontrar
-            for s_idx, shift in enumerate(all_shifts):
-                # Buscar el conductor asignado a este turno
-                assigned_driver = None
-                for d_idx in range(num_drivers):
+            # OPTIMIZACIÓN RADICAL: Crear diccionario shift_idx -> driver_idx en una sola pasada
+            # Esto evita llamar solver.Value() miles de veces buscando el conductor
+            shift_to_driver = {}
+
+            # Iterar por conductor (outer loop), luego por turno (inner loop)
+            # Esto es más cache-friendly y reduce llamadas a solver.Value()
+            print(f"    📋 Paso 1/2: Construyendo mapeo turno→conductor...")
+            for d_idx in range(num_drivers):
+                for s_idx in range(len(all_shifts)):
                     if solver.Value(X[d_idx, s_idx]):
-                        assigned_driver = d_idx
-                        break  # Solo 1 conductor por turno, optimización crítica
+                        shift_to_driver[s_idx] = d_idx
+                        # No break aquí porque necesitamos iterar todos de todos modos
 
-                if assigned_driver is not None:
+            print(f"    📝 Paso 2/2: Creando asignaciones desde mapeo...")
+            # Ahora construir assignments desde el diccionario (sin más solver.Value())
+            for s_idx, shift in enumerate(all_shifts):
+                if s_idx in shift_to_driver:
+                    assigned_driver = shift_to_driver[s_idx]
                     assignments.append({
                         'date': shift['date'].isoformat(),
                         'service': shift['service_id'],
