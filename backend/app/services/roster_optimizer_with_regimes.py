@@ -2336,9 +2336,11 @@ class RosterOptimizerWithRegimes:
         
         if status in [cp_model.OPTIMAL, cp_model.FEASIBLE]:
             # Extraer solución
+            print(f"\n    🔄 Extrayendo asignaciones ({num_drivers} conductores × {len(all_shifts)} turnos)...")
+            extract_start = time.time()
             assignments = []
             driver_regimes = defaultdict(set)  # Track qué regímenes maneja cada conductor
-            
+
             for s_idx, shift in enumerate(all_shifts):
                 for d_idx in range(num_drivers):
                     if solver.Value(X[d_idx, s_idx]):
@@ -2450,6 +2452,9 @@ class RosterOptimizerWithRegimes:
             drivers_used_count = len(driver_summary)
 
             service_warnings = self._detect_service_span_warnings(all_shifts)
+
+            extract_time = time.time() - extract_start
+            print(f"    ✓ Extracción completada en {extract_time:.2f}s ({len(assignments)} asignaciones)\n")
 
             result = {
                 'status': 'success',
