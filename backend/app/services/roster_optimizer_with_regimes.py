@@ -15,6 +15,13 @@ from dataclasses import dataclass, field
 import time
 import calendar
 
+# Importar LNS/ALNS solo para Faena Minera (opcional)
+try:
+    from app.services.lns_alns_optimizer import LNS_ALNS_Optimizer
+    HAS_LNS_ALNS = True
+except ImportError:
+    HAS_LNS_ALNS = False
+
 
 @dataclass
 class LaborRegime:
@@ -553,51 +560,48 @@ class RosterOptimizerWithRegimes:
             USE_CPSAT_OPTIMIZATION = False  # CP-SAT no converge para este problema
 
             # FASE 2: LNS/ALNS OPTIMIZATION
-            if USE_LNS_ALNS:
+            if USE_LNS_ALNS and HAS_LNS_ALNS:
                 try:
-                    lns_class = LNS_ALNS_Optimizer
-                except NameError as e:
-                    print(f"\n⚠️  No se pudo importar LNS_ALNS_Optimizer: {e}")
+                    print(f"\n{'='*80}")
+                    print(f"FASE 2: OPTIMIZACIÓN LNS/ALNS")
+                    print(f"Mejorando solución greedy con Large Neighborhood Search...")
+                    print(f"{'='*80}")
+
+                    # Crear optimizador LNS/ALNS
+                    lns_optimizer = LNS_ALNS_Optimizer(
+                        cycle=best_cycle,
+                        min_rest_hours=5.0,  # 5h descanso entre turnos mismo día
+                        max_daily_hours=14.0
+                    )
+
+                    # Optimizar solución greedy
+                    # Tiempo: 10-12 minutos (deja margen para replicación anual)
+                    lns_solution = lns_optimizer.optimize(
+                        initial_solution=best_greedy,
+                        all_shifts=all_shifts,
+                        max_time=600,  # 10 minutos
+                        temperature_init=100.0,
+                        cooling_rate=0.95,
+                        consolidate_every=50
+                    )
+
+                    # Si LNS mejoró, usar esa solución
+                    if lns_solution['num_drivers'] < best_greedy['num_drivers']:
+                        print(f"\n✨ LNS/ALNS MEJORÓ la solución:")
+                        print(f"   Greedy: {best_greedy['num_drivers']} conductores")
+                        print(f"   LNS:    {lns_solution['num_drivers']} conductores")
+                        print(f"   Mejora: {best_greedy['num_drivers'] - lns_solution['num_drivers']} conductores")
+                        best_greedy = lns_solution
+                        best_cycle = lns_solution['cycle']
+                    else:
+                        print(f"\n⚠️  LNS/ALNS no logró mejorar (greedy ya es muy bueno)")
+                        print(f"   Solución final: {best_greedy['num_drivers']} conductores")
+                except Exception as e:
+                    print(f"\n⚠️  Error en LNS/ALNS: {e}")
                     print(f"   Continuando con solución greedy...")
-                else:
-                    try:
-                        print(f"\n{'='*80}")
-                        print(f"FASE 2: OPTIMIZACIÓN LNS/ALNS")
-                        print(f"Mejorando solución greedy con Large Neighborhood Search...")
-                        print(f"{'='*80}")
-
-                        # Crear optimizador LNS/ALNS
-                        lns_optimizer = lns_class(
-                            cycle=best_cycle,
-                            min_rest_hours=5.0,  # 5h descanso entre turnos mismo día
-                            max_daily_hours=14.0
-                        )
-
-                        # Optimizar solución greedy
-                        # Tiempo: 10-12 minutos (deja margen para replicación anual)
-                        lns_solution = lns_optimizer.optimize(
-                            initial_solution=best_greedy,
-                            all_shifts=all_shifts,
-                            max_time=600,  # 10 minutos
-                            temperature_init=100.0,
-                            cooling_rate=0.95,
-                            consolidate_every=50
-                        )
-
-                        # Si LNS mejoró, usar esa solución
-                        if lns_solution['num_drivers'] < best_greedy['num_drivers']:
-                            print(f"\n✨ LNS/ALNS MEJORÓ la solución:")
-                            print(f"   Greedy: {best_greedy['num_drivers']} conductores")
-                            print(f"   LNS:    {lns_solution['num_drivers']} conductores")
-                            print(f"   Mejora: {best_greedy['num_drivers'] - lns_solution['num_drivers']} conductores")
-                            best_greedy = lns_solution
-                            best_cycle = lns_solution['cycle']
-                        else:
-                            print(f"\n⚠️  LNS/ALNS no logró mejorar (greedy ya es muy bueno)")
-                            print(f"   Solución final: {best_greedy['num_drivers']} conductores")
-                    except Exception as e:
-                        print(f"\n⚠️  Error en LNS/ALNS: {e}")
-                        print(f"   Continuando con solución greedy...")
+            elif USE_LNS_ALNS and not HAS_LNS_ALNS:
+                print(f"\n⚠️  LNS/ALNS no disponible (módulo no encontrado)")
+                print(f"   Continuando con solución greedy...")
 
             if USE_CPSAT_OPTIMIZATION:
                 print(f"\n{'='*80}")
