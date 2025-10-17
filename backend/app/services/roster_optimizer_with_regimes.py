@@ -726,23 +726,15 @@ class RosterOptimizerWithRegimes:
                 # Estrategia: Búsqueda agresiva descendente con timeout generoso
                 greedy_drivers = greedy_result['num_drivers']
 
-                # ESTRATEGIA AGRESIVA: Probar hasta 50% menos que greedy
+                # ESTRATEGIA: Probar hasta 50% menos que greedy
                 # Timeout total: 600s (10 minutos) permite exploración exhaustiva
                 min_drivers_target = max(1, int(greedy_drivers * 0.5))  # Hasta 50% menos
 
-                # OPTIMIZACIÓN INTERURBANO: Empezar desde punto más agresivo para reducir tamaño del problema
-                # Interurbano con 328 turnos y 19 conductores = 6,232 variables → extracción lenta
-                # Empezar con ~75% del greedy reduce variables dramáticamente
-                if self.regime == 'Interurbano':
-                    initial_drivers = max(min_drivers_target, int(greedy_drivers * 0.75))
-                else:
-                    initial_drivers = greedy_drivers - 1
+                # Todos los regímenes no mineros usan la misma estrategia
+                initial_drivers = greedy_drivers - 1
 
                 print(f"  Rango objetivo: {min_drivers_target} a {initial_drivers} conductores")
-                timeout_msg = "30s" if self.regime == 'Interurbano' else "60s"
-                print(f"  Estrategia: Búsqueda descendente con timeout {timeout_msg} por intento ({self.regime})")
-                if self.regime == 'Interurbano':
-                    print(f"  ⚡ Modo rápido Interurbano: Empezando desde {initial_drivers} conductores (75% greedy)")
+                print(f"  Estrategia: Búsqueda descendente desde greedy-1 con timeout 60s por intento")
                 print(f"  Tiempo máximo total: {int(self.timeout)}s (~{int(self.timeout/60)} minutos)\n")
 
                 best_cp_solution = None
@@ -2277,13 +2269,8 @@ class RosterOptimizerWithRegimes:
 
         else:
             # Para regímenes no mineros: timeout diferenciado según complejidad
-            if self.regime == 'Interurbano':
-                # Interurbano: timeout más corto (30s) - encuentra soluciones rápido pero difícil probar optimalidad
-                # Gap típico: best_bound vs objective no cierra en tiempo razonable
-                timeout_per_attempt = min(30.0, remaining_time)
-            else:
-                # Urbano/Industrial: timeout moderado (60s) - más simple, puede alcanzar OPTIMAL
-                timeout_per_attempt = min(60.0, remaining_time)
+            # Todos los regímenes no mineros usan timeout de 60s
+            timeout_per_attempt = min(60.0, remaining_time)
 
             solver.parameters.max_time_in_seconds = timeout_per_attempt
             solver.parameters.num_search_workers = 8  # Más workers para paralelizar
