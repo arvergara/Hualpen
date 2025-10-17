@@ -722,19 +722,29 @@ class RosterOptimizerWithRegimes:
                 # Timeout total: 600s (10 minutos) permite exploración exhaustiva
                 min_drivers_target = max(1, int(greedy_drivers * 0.5))  # Hasta 50% menos
 
-                print(f"  Rango objetivo: {min_drivers_target} a {greedy_drivers-1} conductores")
+                # OPTIMIZACIÓN INTERURBANO: Empezar desde punto más agresivo para reducir tamaño del problema
+                # Interurbano con 328 turnos y 19 conductores = 6,232 variables → extracción lenta
+                # Empezar con ~75% del greedy reduce variables dramáticamente
+                if self.regime == 'Interurbano':
+                    initial_drivers = max(min_drivers_target, int(greedy_drivers * 0.75))
+                else:
+                    initial_drivers = greedy_drivers - 1
+
+                print(f"  Rango objetivo: {min_drivers_target} a {initial_drivers} conductores")
                 timeout_msg = "30s" if self.regime == 'Interurbano' else "60s"
                 print(f"  Estrategia: Búsqueda descendente con timeout {timeout_msg} por intento ({self.regime})")
+                if self.regime == 'Interurbano':
+                    print(f"  ⚡ Modo rápido Interurbano: Empezando desde {initial_drivers} conductores (75% greedy)")
                 print(f"  Tiempo máximo total: {int(self.timeout)}s (~{int(self.timeout/60)} minutos)\n")
 
                 best_cp_solution = None
                 attempt = 0
-                max_attempts = 15  # Hasta 15 intentos (15 x 120s = 30 min máx teórico)
+                max_attempts = 15  # Hasta 15 intentos
                 consecutive_feasible_count = 0  # Contador de FEASIBLE consecutivos sin OPTIMAL
                 max_consecutive_feasible = 3  # Límite de FEASIBLE antes de aceptar solución
 
-                # Probar descendiendo de a 1 conductor desde greedy-1
-                for num_drivers_to_try in range(greedy_drivers - 1, min_drivers_target - 1, -1):
+                # Probar descendiendo de a 1 conductor
+                for num_drivers_to_try in range(initial_drivers, min_drivers_target - 1, -1):
                     # Verificar timeout global
                     elapsed = time.time() - self.start_time
                     if elapsed > self.timeout:
