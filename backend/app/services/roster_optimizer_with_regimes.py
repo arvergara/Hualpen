@@ -2762,6 +2762,7 @@ class RosterOptimizerWithRegimes:
 
         Incluye:
         - Tiempo de colación obligatorio de 60 minutos para jornadas > 5 horas
+        - Span máximo de 12 horas por jornada diaria
         """
         # Agrupar turnos por día para verificar jornadas y colación
         shifts_by_date = defaultdict(list)
@@ -2773,37 +2774,34 @@ class RosterOptimizerWithRegimes:
                 # Ordenar por hora de inicio
                 day_shifts.sort(key=lambda x: x[1]['start_minutes'])
 
-                # Si el conductor trabaja múltiples turnos en el día
-                # debe tener al menos 60 minutos de colación entre turnos
-                # si la jornada total supera 5 horas
+                # RESTRICCIÓN 1: SPAN MÁXIMO DE 12 HORAS
+                # Verificar todas las combinaciones de 2+ turnos en el mismo día
+                for i in range(len(day_shifts)):
+                    for j in range(i + 1, len(day_shifts)):
+                        s_idx_i, shift_i = day_shifts[i]
+                        s_idx_j, shift_j = day_shifts[j]
 
-                # Variables para rastrear si se asignan turnos
-                day_assignments = [X[driver_idx, s_idx] for s_idx, _ in day_shifts]
+                        # Calcular span si trabaja ambos turnos
+                        span_minutes = shift_j['end_minutes'] - shift_i['start_minutes']
 
-                # Si trabaja más de un turno en el día
-                works_multiple = model.NewBoolVar(f'works_multiple_d{driver_idx}_date{date}')
-                model.Add(sum(day_assignments) >= 2).OnlyEnforceIf(works_multiple)
-                model.Add(sum(day_assignments) <= 1).OnlyEnforceIf(works_multiple.Not())
+                        # Si el span excede 12 horas (720 minutos), no puede hacer ambos
+                        if span_minutes > 720:
+                            model.Add(X[driver_idx, s_idx_i] + X[driver_idx, s_idx_j] <= 1)
 
-                # Si trabaja múltiples turnos, verificar colación
-                if len(day_shifts) > 1:
-                    for i in range(len(day_shifts) - 1):
-                        s_idx1, shift1 = day_shifts[i]
-                        s_idx2, shift2 = day_shifts[i + 1]
+                # RESTRICCIÓN 2: COLACIÓN DE 60 MINUTOS
+                # Si trabaja múltiples turnos consecutivos y jornada > 5h
+                for i in range(len(day_shifts) - 1):
+                    s_idx1, shift1 = day_shifts[i]
+                    s_idx2, shift2 = day_shifts[i + 1]
 
-                        # Gap entre turnos (en minutos)
-                        gap_minutes = shift2['start_minutes'] - shift1['end_minutes']
+                    # Gap entre turnos (en minutos)
+                    gap_minutes = shift2['start_minutes'] - shift1['end_minutes']
 
-                        # Si ambos turnos se asignan al conductor
-                        both_assigned = model.NewBoolVar(f'both_d{driver_idx}_s{s_idx1}_s{s_idx2}')
-                        model.Add(X[driver_idx, s_idx1] + X[driver_idx, s_idx2] == 2).OnlyEnforceIf(both_assigned)
-                        model.Add(X[driver_idx, s_idx1] + X[driver_idx, s_idx2] <= 1).OnlyEnforceIf(both_assigned.Not())
-
-                        # Si trabaja ambos turnos y la jornada total > 5h, necesita 60 min de colación
-                        total_hours = shift1['duration_hours'] + shift2['duration_hours']
-                        if total_hours > 5.0 and gap_minutes < 60:
-                            # No puede hacer ambos turnos si no hay suficiente tiempo para colación
-                            model.Add(X[driver_idx, s_idx1] + X[driver_idx, s_idx2] <= 1)
+                    # Si trabaja ambos turnos y la jornada total > 5h, necesita 60 min de colación
+                    total_hours = shift1['duration_hours'] + shift2['duration_hours']
+                    if total_hours > 5.0 and gap_minutes < 60:
+                        # No puede hacer ambos turnos si no hay suficiente tiempo para colación
+                        model.Add(X[driver_idx, s_idx1] + X[driver_idx, s_idx2] <= 1)
 
     def _add_faena_minera_constraints(self, model: cp_model.CpModel, X: Dict,
                                      driver_idx: int, shifts: List[Tuple[int, Dict]],
