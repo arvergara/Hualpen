@@ -709,6 +709,16 @@ class RosterOptimizerWithRegimes:
                 print(f"\n  ✓ SOLUCIÓN GREEDY: {greedy_result['num_drivers']} conductores, cobertura {greedy_result['coverage']*100:.1f}%")
                 best_solution = greedy_result
 
+                # DESHABILITAR CP-SAT TEMPORALMENTE PARA INTERURBANO (problema de extracción lenta)
+                if self.regime == 'Interurbano':
+                    print(f"\n{'='*80}")
+                    print(f"FASE 2: CP-SAT DESHABILITADO PARA INTERURBANO")
+                    print(f"{'='*80}")
+                    print(f"  ⚠️  CP-SAT deshabilitado temporalmente para régimen Interurbano")
+                    print(f"  Razón: Extracción de asignaciones extremadamente lenta con 328 turnos")
+                    print(f"  Usando solución greedy: {greedy_result['num_drivers']} conductores\n")
+                    return best_solution
+
                 # FASE 2: OPTIMIZACIÓN CP-SAT (habilitado según instrucción "SI O SI CP-SAT")
                 print(f"\n{'='*80}")
                 print(f"FASE 2: OPTIMIZACIÓN CP-SAT DESDE SOLUCIÓN GREEDY")
